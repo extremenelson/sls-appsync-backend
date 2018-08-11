@@ -20,7 +20,48 @@ plugins:
 provider:
   name: aws
   runtime: nodejs8.10
-  region: us-east-1
+  region: #{AWS::Region}
+  apiname: ${opt:apiname, 'notes-dev'}
+
+custom:
+  accountId: #{AWS::AccountId}
+  appSync:
+    name: ${self:provider.apiname}
+    authenticationType: AMAZON_COGNITO_USER_POOLS
+    userPoolConfig:
+      awsRegion: #{AWS::Region}
+      defaultAction: ALLOW
+      userPoolId: { Ref: UserPool }
+    schema: schema.graphql # In case you want to change it
+    serviceRole: "AppSyncServiceRole"
+    dataSources:
+      - type: AMAZON_DYNAMODB
+        name: NotesTable
+        description: "DynamoDB Notes Table"
+        config:
+          tableName: { Ref: NotesTable }
+          serviceRoleArn: { Fn::GetAtt: [ DynamoDBRole, Arn ] }
+    mappingTemplates:
+      - dataSource: NotesTable
+        type: Query
+        field: allNotes
+        request: "allnotes-request.vtl"
+        response: "allnotes-response.vtl"
+      - dataSource: NotesTable
+        type: Query
+        field: getNote
+        request: "getnote-request.vtl"
+        response: "common-response.vtl"
+      - dataSource: NotesTable
+        type: Mutation
+        field: saveNote
+        request: "savenote-request.vtl"
+        response: "common-response.vtl"
+      - dataSource: NotesTable
+        type: Mutation
+        field: deleteNote
+        request: "deletenote-request.vtl"
+        response: "common-response.vtl"
 
 resources:
   Resources:
@@ -29,7 +70,7 @@ resources:
       Type: "AWS::Cognito::UserPool"
       Description: "An Amazon Cognito user pool for authenticating users"
       Properties:
-        UserPoolName: !Sub ${APIName}-user-pool
+        UserPoolName: !Sub ${self:provider.apiname}-user-pool
         AutoVerifiedAttributes:
           - phone_number
         MfaConfiguration: "OFF"
@@ -52,7 +93,7 @@ resources:
       Type: "AWS::Cognito::UserPoolClient"
       Description: "App Client used by AWS AppSync"
       Properties:
-        ClientName: !Sub ${APIName}-appsync-client
+        ClientName: !Sub ${self:provider.apiname}-appsync-client
         GenerateSecret: false
         UserPoolId: !Ref UserPool
 
@@ -61,7 +102,7 @@ resources:
       Type: "AWS::DynamoDB::Table"
       Description: "Data Store for AWS AppSync Notes Type"
       Properties:
-        TableName: !Sub ${APIName}-notes-table
+        TableName: !Sub ${self:provider.apiname}-notes-table
         AttributeDefinition:
           - AttributeName: "NoteId"
             AttributeType: "S"
@@ -97,7 +138,7 @@ resources:
       DependsOn:
         - AppSyncDynamoDBPolicy
       Properties:
-        RoleName: !Sub ${APIName}-appsync-dynamodb-role
+        RoleName: !Sub ${self:provider.apiname}-appsync-dynamodb-role
         ManagedPolicyArns:
           - Ref: AppSyncDynamoDBPolicy
         AssumeRolePolicyDocument:
