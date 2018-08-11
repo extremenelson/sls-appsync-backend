@@ -1,0 +1,113 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: sls-appsync-backend
+
+plugins:
+  - serverless-appsync-plugin
+  - serverless-pseudo-parameters
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  region: us-east-1
+
+resources:
+  Resources:
+    # Amazon Cognito user pool
+    UserPool:
+      Type: "AWS::Cognito::UserPool"
+      Description: "An Amazon Cognito user pool for authenticating users"
+      Properties:
+        UserPoolName: !Sub ${APIName}-user-pool
+        AutoVerifiedAttributes:
+          - phone_number
+        MfaConfiguration: "OFF"
+        Schema:
+          - Name: name
+            AttributeDataType: String
+            Mutable: true
+            Required: true
+          - Name: email
+            AttributeDataType: String
+            Mutable: false
+            Required: true
+          - Name: phone_number
+            AttributeDataType: String
+            Mutable: false
+            Required: true
+
+    # An app client for the Amazon Cognito user pool
+    UserPoolClient:
+      Type: "AWS::Cognito::UserPoolClient"
+      Description: "App Client used by AWS AppSync"
+      Properties:
+        ClientName: !Sub ${APIName}-appsync-client
+        GenerateSecret: false
+        UserPoolId: !Ref UserPool
+
+    # DynamoDB Table
+    NotesTable:
+      Type: "AWS::DynamoDB::Table"
+      Description: "Data Store for AWS AppSync Notes Type"
+      Properties:
+        TableName: !Sub ${APIName}-notes-table
+        AttributeDefinition:
+          - AttributeName: "NoteId"
+            AttributeType: "S"
+          - AttributeName: "UserId"
+            AttributeType: "S"
+        KeySchema:
+          - AttributeName: "NoteId"
+            KeyType: "HASH"
+          - AttributeName: "UserId"
+            KeyType: "RANGE"
+        ProvisionedThroughPut:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+
+    # IAM Policy to allow working with DynamoDB
+    AppSyncDynamoDBPolicy:
+      Type: "AWS::IAM::ManagedPolicy"
+      Description: "Managed Policy to allow AWS AppSync to access tables in DynamoDB"
+      Properties:
+        Path: /appsync/
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:*
+              Resource: !Join [ "", [ !GetAtt NotesTable.Arn, "*" ] ]
+
+    # IAM Role for implementing the AppSync / DynamoDB policy
+    DynamoDBRole:
+      Type: "AWS::IAM::Role"
+      Description: "IAM Role for allowing AppSync to access DynamoDB"
+      DependsOn:
+        - AppSyncDynamoDBPolicy
+      Properties:
+        RoleName: !Sub ${APIName}-appsync-dynamodb-role
+        ManagedPolicyArns:
+          - Ref: AppSyncDynamoDBPolicy
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - sts:AssumeRole
+              Principal:
+                Service:
+                  - appsync.amazonaws.com
+
+
