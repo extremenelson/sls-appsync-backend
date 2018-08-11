@@ -15,49 +15,48 @@ service: sls-appsync-backend
 
 plugins:
   - serverless-appsync-plugin
-  - serverless-pseudo-parameters
 
 provider:
   name: aws
   runtime: nodejs8.10
-  region: #{AWS::Region}
   apiname: ${opt:apiname, 'notes-dev'}
 
 custom:
-  accountId: #{AWS::AccountId}
+  accountId: { Ref: AWS::AccountId }
   appSync:
     name: ${self:provider.apiname}
+    region: ${self:provider.region}
     authenticationType: AMAZON_COGNITO_USER_POOLS
     userPoolConfig:
-      awsRegion: #{AWS::Region}
+      awsRegion: { Ref: AWS::Region }
       defaultAction: ALLOW
       userPoolId: { Ref: UserPool }
     schema: schema.graphql # In case you want to change it
     serviceRole: "AppSyncServiceRole"
     dataSources:
       - type: AMAZON_DYNAMODB
-        name: NotesTable
+        name: NotesTableDS
         description: "DynamoDB Notes Table"
         config:
           tableName: { Ref: NotesTable }
           serviceRoleArn: { Fn::GetAtt: [ DynamoDBRole, Arn ] }
     mappingTemplates:
-      - dataSource: NotesTable
+      - dataSource: NotesTableDS
         type: Query
         field: allNotes
         request: "allnotes-request.vtl"
         response: "allnotes-response.vtl"
-      - dataSource: NotesTable
+      - dataSource: NotesTableDS
         type: Query
         field: getNote
         request: "getnote-request.vtl"
         response: "common-response.vtl"
-      - dataSource: NotesTable
+      - dataSource: NotesTableDS
         type: Mutation
         field: saveNote
         request: "savenote-request.vtl"
         response: "common-response.vtl"
-      - dataSource: NotesTable
+      - dataSource: NotesTableDS
         type: Mutation
         field: deleteNote
         request: "deletenote-request.vtl"
@@ -70,40 +69,24 @@ resources:
       Type: "AWS::Cognito::UserPool"
       Description: "An Amazon Cognito user pool for authenticating users"
       Properties:
-        UserPoolName: !Sub ${self:provider.apiname}-user-pool
-        AutoVerifiedAttributes:
-          - phone_number
-        MfaConfiguration: "OFF"
-        Schema:
-          - Name: name
-            AttributeDataType: String
-            Mutable: true
-            Required: true
-          - Name: email
-            AttributeDataType: String
-            Mutable: false
-            Required: true
-          - Name: phone_number
-            AttributeDataType: String
-            Mutable: false
-            Required: true
+        UserPoolName: ${self:provider.apiname}-user-pool
 
     # An app client for the Amazon Cognito user pool
     UserPoolClient:
       Type: "AWS::Cognito::UserPoolClient"
       Description: "App Client used by AWS AppSync"
       Properties:
-        ClientName: !Sub ${self:provider.apiname}-appsync-client
+        ClientName: ${self:provider.apiname}-appsync-client
         GenerateSecret: false
-        UserPoolId: !Ref UserPool
+        UserPoolId: { Ref: UserPool }
 
     # DynamoDB Table
     NotesTable:
       Type: "AWS::DynamoDB::Table"
       Description: "Data Store for AWS AppSync Notes Type"
       Properties:
-        TableName: !Sub ${self:provider.apiname}-notes-table
-        AttributeDefinition:
+        TableName: ${self:provider.apiname}-notes-table
+        AttributeDefinitions:
           - AttributeName: "NoteId"
             AttributeType: "S"
           - AttributeName: "UserId"
@@ -113,23 +96,29 @@ resources:
             KeyType: "HASH"
           - AttributeName: "UserId"
             KeyType: "RANGE"
-        ProvisionedThroughPut:
+        ProvisionedThroughput:
           ReadCapacityUnits: 5
           WriteCapacityUnits: 5
 
     # IAM Policy to allow working with DynamoDB
     AppSyncDynamoDBPolicy:
       Type: "AWS::IAM::ManagedPolicy"
-      Description: "Managed Policy to allow AWS AppSync to access tables in DynamoDB"
       Properties:
+        Description: "Managed Policy to allow AWS AppSync to access tables in DynamoDB"
         Path: /appsync/
         PolicyDocument:
-          Version: 2012-10-17
+          Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
-                - dynamodb:*
-              Resource: !Join [ "", [ !GetAtt NotesTable.Arn, "*" ] ]
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: 
+                - { Fn::Join: [ '', [ { Fn::GetAtt: [ NotesTable, Arn ] }, '/*' ] ] }
 
     # IAM Role for implementing the AppSync / DynamoDB policy
     DynamoDBRole:
@@ -138,11 +127,11 @@ resources:
       DependsOn:
         - AppSyncDynamoDBPolicy
       Properties:
-        RoleName: !Sub ${self:provider.apiname}-appsync-dynamodb-role
+        RoleName: ${self:provider.apiname}-appsync-dynamodb-role
         ManagedPolicyArns:
           - Ref: AppSyncDynamoDBPolicy
         AssumeRolePolicyDocument:
-          Version: 2012-10-17
+          Version: "2012-10-17"
           Statement:
             - Effect: Allow
               Action:
